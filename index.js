@@ -217,47 +217,106 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ─── Message Command: ?close ──────────────────────────────────────────────────
+// ─── Message Commands ─────────────────────────────────────────────────────────
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-  if (!message.content.startsWith("?close")) return;
+  if (!message.content.startsWith("?")) return;
 
-  // Check if staff
   const member = message.member;
   const isStaff =
     member.roles.cache.has(STAFF_ROLE_1) || member.roles.cache.has(STAFF_ROLE_2);
 
-  if (!isStaff) {
-    return message.reply("❌ Only staff can close tickets.");
+  // ── ?sendpanel [channel id] ──
+  if (message.content.startsWith("?sendpanel")) {
+    if (!isStaff) {
+      return message.reply("❌ Only staff can deploy the ticket panel.");
+    }
+
+    // Parse optional channel ID — accepts raw ID or a #channel mention
+    const arg = message.content.slice("?sendpanel".length).trim();
+    const channelIdArg = arg.replace(/^<#(\d+)>$/, "$1"); // unwrap <#id> if pasted as mention
+
+    let targetChannel = message.channel; // default: current channel
+
+    if (channelIdArg) {
+      try {
+        const fetched = await message.guild.channels.fetch(channelIdArg);
+        if (!fetched || !fetched.isTextBased()) {
+          return message.reply("❌ Could not find a text channel with that ID.");
+        }
+        targetChannel = fetched;
+      } catch {
+        return message.reply("❌ Invalid channel ID. Usage: `?sendpanel` or `?sendpanel <channel id>`");
+      }
+    }
+
+    const embed = new EmbedBuilder()
+      .setTitle("📞 Support Ticket System")
+      .setDescription(
+        "Need help? Click the button below to open a new support ticket.\n\n" +
+        "**You'll be asked for:**\n" +
+        "• 🔢 Extension number\n" +
+        "• 📋 Caller ID\n" +
+        "• 📬 Voicemail preference\n" +
+        "• ⭐ Any additional features or notes\n\n" +
+        "*Extensions 1000–1020 are reserved for the Owner.*"
+      )
+      .setColor(0x5865f2)
+      .setFooter({ text: "Our staff will be with you shortly." })
+      .setTimestamp();
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("open_ticket")
+        .setLabel("🎫 Open Ticket")
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    await targetChannel.send({ embeds: [embed], components: [row] });
+
+    // If targeting another channel, confirm back to the staff member; then clean up
+    if (targetChannel.id !== message.channel.id) {
+      await message.reply({ content: `✅ Panel sent to ${targetChannel}.`, allowedMentions: { parse: [] } });
+    }
+    await message.delete().catch(() => {});
+    return;
   }
 
-  const reason =
-    message.content.slice("?close".length).trim() || "No reason provided";
+  // ── ?close ──
+  if (message.content.startsWith("?close")) {
+    if (!isStaff) {
+      return message.reply("❌ Only staff can close tickets.");
+    }
 
-  const confirmRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId(`confirm_close:${reason}`)
-      .setLabel("✅ Confirm Close")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId("cancel_close")
-      .setLabel("❌ Cancel")
-      .setStyle(ButtonStyle.Secondary)
-  );
+    const reason =
+      message.content.slice("?close".length).trim() || "No reason provided";
 
-  await message.channel.send({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle("🔒 Close Ticket Request")
-        .setColor(0xed4245)
-        .setDescription(
-          `**${message.author.tag}** has requested to close this ticket.\n\n**Reason:** ${reason}`
-        )
-        .setFooter({ text: "This channel will be deleted after closing." })
-        .setTimestamp(),
-    ],
-    components: [confirmRow],
-  });
+    const confirmRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`confirm_close:${reason}`)
+        .setLabel("✅ Confirm Close")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("cancel_close")
+        .setLabel("❌ Cancel")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await message.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🔒 Close Ticket Request")
+          .setColor(0xed4245)
+          .setDescription(
+            `**${message.author.tag}** has requested to close this ticket.\n\n**Reason:** ${reason}`
+          )
+          .setFooter({ text: "This channel will be deleted after closing." })
+          .setTimestamp(),
+      ],
+      components: [confirmRow],
+    });
+    return;
+  }
 });
 
 // ─── Close Handler ────────────────────────────────────────────────────────────
