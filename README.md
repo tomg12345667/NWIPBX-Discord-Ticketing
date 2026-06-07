@@ -1,4 +1,4 @@
-# 📞 Discord Ticket Bot
+# MWIPBX
 
 A Discord ticketing bot with modal forms, automatic channel creation, and staff close flow.
 
@@ -6,11 +6,11 @@ A Discord ticketing bot with modal forms, automatic channel creation, and staff 
 
 ## Features
 
-- 🎫 **Ticket Panel** — persistent button embed in any channel
-- 📋 **Modal Form** — collects Extension, Caller ID, Voicemail, and Additional Features
-- 🔒 **Extension Guard** — blocks 1000–1020 (reserved for Owner)
-- 📁 **Private Channel** — auto-created with correct permissions for staff roles + user
-- ❌ **?close** command — staff-only, prompts for reason, sends confirmation embed, deletes channel after 5s
+-  **Ticket Panel** — persistent button embed in any channel
+-  **Form** — collects Extension, Caller ID, Voicemail, and Additional Features
+-  **Extension Guard** — blocks 1000–1020 (reserved for Owner)
+-  **Private Channel** — auto-created with correct permissions for staff roles + user
+-  **?close** command — staff-only, prompts for reason, sends confirmation embed, deletes channel after 5s
 
 ---
 
@@ -22,8 +22,8 @@ A Discord ticketing bot with modal forms, automatic channel creation, and staff 
 2. Click **New Application** → name it
 3. Go to **Bot** tab → click **Add Bot**
 4. Under **Privileged Gateway Intents**, enable:
-   - ✅ Server Members Intent
-   - ✅ Message Content Intent
+   -  Server Members Intent
+   -  Message Content Intent
 5. Copy the **Token** (you'll need it in `.env`)
 
 ### 2. Invite the Bot
@@ -113,5 +113,5 @@ e.g. `ticket-john-ext1025`
 
 | Range | Status |
 |---|---|
-| 1000–1020 | 🔒 Reserved for Owner — blocked |
-| All others | ✅ Allowed |
+| 1000–1020 |  Reserved for Owner — blocked |
+| All others |  Allowed |
