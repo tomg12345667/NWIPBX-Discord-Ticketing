@@ -145,8 +145,11 @@ async function createTicketChannel(guild, opener, { type = "line", fields = {}, 
   const embedFields = [
     { name: "👤 Opened By", value: `<@${opener.id}>`, inline: true },
     { name: "🎫 Ticket #",  value: `\`${ticketNumber}\``, inline: true },
-    { name: "📂 Type",      value: type === "line" ? "📱 New Line" : "🎫 General Support", inline: true },
   ];
+
+  if (!manualReason) {
+    embedFields.push({ name: "📂 Type", value: type === "line" ? "📱 New Line" : "🎫 General Support", inline: true });
+  }
 
   if (manualReason) {
     embedFields.push({ name: "📝 Reason (Manual Open)", value: manualReason, inline: false });
@@ -394,6 +397,18 @@ client.on("interactionCreate", async (interaction) => {
     // ── Manual Open: "Add Reasoning" button ──
     if (interaction.isButton() && interaction.customId.startsWith("manual_reason:")) {
       const targetUserId = interaction.customId.split(":")[1];
+
+      // Disable the button immediately so it can't be clicked twice
+      await interaction.update({
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`manual_reason:${targetUserId}`)
+            .setLabel("📝 Add Reasoning")
+            .setStyle(ButtonStyle.Primary)
+            .setDisabled(true)
+        )],
+      });
+
       const modal = new ModalBuilder().setCustomId(`manual_reason_submit:${targetUserId}`).setTitle("📝 Add Reasoning");
       modal.addComponents(new ActionRowBuilder().addComponents(
         new TextInputBuilder().setCustomId("reason").setLabel("Reason for opening this ticket")
@@ -407,29 +422,30 @@ client.on("interactionCreate", async (interaction) => {
     // ── Manual Open: Reason Modal Submit ──
     if (interaction.isModalSubmit() && interaction.customId.startsWith("manual_reason_submit:")) {
       const targetUserId = interaction.customId.split(":")[1];
-      const reason = interaction.fields.getTextInputValue("reason").trim();
 
+      // Guard against double submission
+      if (pendingManualOpens.get(`submitted:${targetUserId}`)) return;
+      pendingManualOpens.set(`submitted:${targetUserId}`, true);
+
+      const reason = interaction.fields.getTextInputValue("reason").trim();
       await interaction.deferReply({ ephemeral: true });
 
       let targetUser;
       try { targetUser = await client.users.fetch(targetUserId); }
-      catch { return interaction.editReply({ content: "❌ Could not fetch the target user." }); }
+      catch {
+        pendingManualOpens.delete(`submitted:${targetUserId}`);
+        return interaction.editReply({ content: "❌ Could not fetch the target user." });
+      }
 
       try {
         const { channel, ticketNumber } = await createTicketChannel(
-          interaction.guild, targetUser, { type: "line", fields: {}, manualReason: `${reason}\n\n*(Opened manually by ${interaction.user.tag})*` }
+          interaction.guild, targetUser,
+          { type: "line", fields: {}, manualReason: `${reason}\n\n*(Opened manually by ${interaction.user.tag})*` }
         );
-        // Update the original manual open message
-        try {
-          const pending = pendingManualOpens.get(interaction.message?.id);
-          if (pending) {
-            await interaction.message.edit({ content: `✅ Ticket #${ticketNumber} opened for <@${targetUserId}>: ${channel}`, components: [] });
-            pendingManualOpens.delete(interaction.message.id);
-          }
-        } catch {}
         await interaction.editReply({ content: `✅ Ticket #${ticketNumber} opened for <@${targetUserId}>: ${channel}` });
       } catch (err) {
         console.error("Manual open error:", err);
+        pendingManualOpens.delete(`submitted:${targetUserId}`);
         await interaction.editReply({ content: "❌ Failed to create the ticket." });
       }
       return;
