@@ -569,6 +569,100 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    // ── Edit Response Open Button ──
+    if (interaction.isButton() && interaction.customId.startsWith("editresponse_open:")) {
+      const ticketNum = parseInt(interaction.customId.split(":")[1], 10);
+      if (!isStaff(interaction.member))
+        return interaction.reply({ content: "❌ Only staff can edit ticket responses.", ephemeral: true });
+
+      const entry = [...ticketRegistry.entries()].find(([, v]) => v.ticketNumber === ticketNum);
+      if (!entry)
+        return interaction.reply({ content: `❌ Ticket #${ticketNum} not found or already closed.`, ephemeral: true });
+
+      const [, ticketData] = entry;
+      const form = formConfig[ticketData.type] ?? formConfig.line;
+      const current = ticketData.fields ?? {};
+
+      const modal = new ModalBuilder()
+        .setCustomId(`editresponse_submit:${ticketNum}`)
+        .setTitle(`✏️ Edit Ticket #${ticketNum} Responses`);
+
+      for (const f of form.fields) {
+        modal.addComponents(new ActionRowBuilder().addComponents(
+          new TextInputBuilder()
+            .setCustomId(f.id)
+            .setLabel(f.label)
+            .setStyle(f.id === "features" || f.id === "description" || f.id === "extra" ? TextInputStyle.Paragraph : TextInputStyle.Short)
+            .setRequired(false)
+            .setValue(current[f.id] ?? "")
+            .setMaxLength(1000)
+        ));
+      }
+
+      await interaction.showModal(modal);
+      return;
+    }
+
+    // ── Edit Response Modal Submit ──
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("editresponse_submit:")) {
+      const ticketNum = parseInt(interaction.customId.split(":")[1], 10);
+
+      const entry = [...ticketRegistry.entries()].find(([, v]) => v.ticketNumber === ticketNum);
+      if (!entry)
+        return interaction.reply({ content: `❌ Ticket #${ticketNum} not found.`, ephemeral: true });
+
+      const [channelId, ticketData] = entry;
+      const form = formConfig[ticketData.type] ?? formConfig.line;
+
+      // Update fields in registry
+      for (const f of form.fields) {
+        try { ticketData.fields[f.id] = interaction.fields.getTextInputValue(f.id).trim(); }
+        catch {}
+      }
+      ticketRegistry.set(channelId, ticketData);
+
+      // Rebuild and update the original ticket embed
+      try {
+        const ticketChannel = await client.channels.fetch(channelId);
+        const msgs = await ticketChannel.messages.fetch({ limit: 10 });
+        const botMsg = msgs.find(m => m.author.id === client.user.id && m.embeds.length > 0);
+
+        if (botMsg) {
+          const embedFields = [
+            { name: "👤 Opened By", value: `<@${ticketData.openerId}>`, inline: true },
+            { name: "🎫 Ticket #",  value: `\`${ticketData.ticketNumber}\``, inline: true },
+          ];
+          if (!ticketData.manualReason) {
+            embedFields.push({ name: "📂 Type", value: ticketData.type === "line" ? "📱 New Line" : "🎫 General Support", inline: true });
+          }
+          if (ticketData.manualReason) {
+            embedFields.push({ name: "📝 Reason (Manual Open)", value: ticketData.manualReason, inline: false });
+          } else {
+            for (const f of form.fields) {
+              if (ticketData.fields[f.id]) {
+                embedFields.push({ name: f.label, value: ticketData.fields[f.id] || "*Not provided*", inline: f.id !== "description" && f.id !== "features" });
+              }
+            }
+          }
+
+          const updatedEmbed = new EmbedBuilder()
+            .setTitle(ticketData.type === "line" ? "📱 New Line Request" : "🎫 General Support Ticket")
+            .setColor(ticketData.type === "line" ? 0x5865f2 : 0x57f287)
+            .setThumbnail((await client.users.fetch(ticketData.openerId)).displayAvatarURL({ dynamic: true }))
+            .addFields(embedFields)
+            .setFooter({ text: `Last edited by ${interaction.user.tag}` })
+            .setTimestamp();
+
+          await botMsg.edit({ embeds: [updatedEmbed] });
+        }
+      } catch (err) {
+        console.error("Failed to update ticket embed:", err);
+      }
+
+      await interaction.reply({ content: `✅ Ticket #${ticketNum} responses updated.`, ephemeral: true });
+      return;
+    }
+
   } catch (err) {
     console.error("[interactionCreate error]", err);
   }
@@ -687,58 +781,128 @@ client.on("messageCreate", async (message) => {
   }
 
   // ── ?editform <line|general> ──
-  if (message.content.startsWith("?editform")) {
-    if (!isAdmin(member)) return message.reply("❌ Only admins can edit forms.");
+  // ── ?editformresponse <ticket number> ──
+  if (message.content.startsWith("?editformresponse")) {
+    if (!isStaff(member)) return message.reply("❌ Only staff can edit ticket responses.");
 
-    const arg  = message.content.slice("?editform".length).trim().toLowerCase();
-    if (!arg || !["line", "general"].includes(arg))
-      return message.reply("❌ Usage: `?editform <line|general>`");
+    const arg = message.content.slice("?editformresponse".length).trim();
+    const ticketNum = parseInt(arg, 10);
+    if (isNaN(ticketNum)) return message.reply("❌ Usage: `?editformresponse <ticket number>`");
 
-    const form = formConfig[arg];
-    const panelInfo = panelRegistry.get(arg);
+    const entry = [...ticketRegistry.entries()].find(([, v]) => v.ticketNumber === ticketNum);
+    if (!entry) return message.reply(`❌ Ticket #${ticketNum} not found or already closed.`);
 
-    const modal = new ModalBuilder()
-      .setCustomId(`editform_modal:${arg}:${panelInfo?.messageId ?? "none"}`)
-      .setTitle(`✏️ Edit ${arg === "line" ? "New Line" : "General"} Form`);
+    const [channelId, ticketData] = entry;
+    const form = formConfig[ticketData.type] ?? formConfig.line;
 
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("form_title").setLabel("Form Title")
-          .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.title).setMaxLength(100)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("field1_label").setLabel(`Field 1 Label`)
-          .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.fields[0]?.label ?? "").setMaxLength(100)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("field2_label").setLabel(`Field 2 Label`)
-          .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.fields[1]?.label ?? "").setMaxLength(100)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("field3_label").setLabel(`Field 3 Label`)
-          .setStyle(TextInputStyle.Short).setRequired(false).setValue(form.fields[2]?.label ?? "").setMaxLength(100)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder().setCustomId("field4_label").setLabel(`Field 4 Label`)
-          .setStyle(TextInputStyle.Short).setRequired(false).setValue(form.fields[3]?.label ?? "").setMaxLength(100)
-      ),
-    );
-
-    // Modals can't be sent from message commands directly — send a button prompt first
-    const sent = await message.reply({
+    // Send a button prompt (modals can't open from message commands directly)
+    await message.reply({
       embeds: [new EmbedBuilder()
-        .setTitle(`✏️ Edit ${arg} Form`)
-        .setDescription("Click below to open the form editor.")
+        .setTitle(`✏️ Edit Responses — Ticket #${ticketNum}`)
+        .setDescription(`Click below to edit the submitted responses for <@${ticketData.openerId}>'s ticket.`)
         .setColor(0xfee75c)],
       components: [new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId(`editform_open:${arg}`).setLabel("✏️ Open Form Editor").setStyle(ButtonStyle.Primary)
+        new ButtonBuilder()
+          .setCustomId(`editresponse_open:${ticketNum}`)
+          .setLabel("✏️ Edit Responses")
+          .setStyle(ButtonStyle.Primary)
       )],
     });
+    return;
+  }
 
-    // Store for the button handler below
-    pendingManualOpens.set(`editform:${message.author.id}`, { type: arg });
+  // ── ?ticket sendstaffinfo <channel id> ──
+  if (message.content.startsWith("?ticket sendstaffinfo")) {
+    if (!isStaff(member)) return message.reply("❌ Only staff can use this command.");
+
+    const arg = message.content.slice("?ticket sendstaffinfo".length).trim();
+    const channelIdArg = arg.replace(/^<#(\d+)>$/, "$1");
+
+    if (!channelIdArg) return message.reply("❌ Usage: `?ticket sendstaffinfo <channel id>`");
+
+    let targetChannel;
+    try {
+      targetChannel = await message.guild.channels.fetch(channelIdArg);
+      if (!targetChannel?.isTextBased()) return message.reply("❌ That is not a valid text channel.");
+    } catch {
+      return message.reply("❌ Could not find a channel with that ID.");
+    }
+
+    const lines = [
+      "TICKETING SYSTEM - STAFF INFORMATION",
+      "=====================================",
+      "",
+      "COMMANDS",
+      "--------",
+      "",
+      "?sendpanel <line|general> <channel id>",
+      "Deploys a ticket panel to the specified channel. Use 'line' for new line requests or 'general' for general support tickets. Both the panel type and channel ID are required.",
+      "",
+      "?close <reason>",
+      "Closes the current ticket channel. Posts a confirmation prompt with the reason before proceeding. The reason can be edited before confirming. Once confirmed, a transcript is generated and the channel is deleted after 5 seconds.",
+      "",
+      "?manualopen <@user or user id>",
+      "Manually opens a ticket on behalf of a user. After running the command, a prompt appears requiring staff to add a reason before the ticket is created. The ticket will not open until a reason is submitted.",
+      "",
+      "?reopen <ticket number>",
+      "Checks if a ticket is still open and points to its channel. If the ticket has already been closed, it will notify staff and suggest using ?manualopen instead.",
+      "",
+      "?editformresponse <ticket number>",
+      "Allows staff to edit the submitted form responses on an open ticket. Opens a pre-filled modal with the current responses. Once submitted, the original ticket embed is updated to reflect the changes.",
+      "",
+      "?ticket sendstaffinfo <channel id>",
+      "Sends this staff information message to the specified channel.",
+      "",
+      "HOW CLOSING WORKS",
+      "-----------------",
+      "",
+      "When a staff member runs ?close, a message is posted in the ticket channel showing the reason with three options: confirm the close, edit the reason, or cancel.",
+      "",
+      "If confirmed, the bot immediately begins generating a transcript of all messages in the channel. The channel is then deleted 5 seconds after the close embed is posted.",
+      "",
+      "HOW TRANSCRIPTS WORK",
+      "--------------------",
+      "",
+      "When a ticket is closed, a plain text transcript is generated containing every message sent in the channel, including timestamps and usernames.",
+      "",
+      "The transcript is sent in two places:",
+      "1. As a direct message to the user who opened the ticket.",
+      "2. Posted in the transcripts log channel along with a summary embed showing who opened the ticket, who closed it, and the close reason.",
+      "",
+      "If the user has their direct messages disabled, the bot will skip the DM silently and still post to the log channel.",
+      "",
+      "EXTENSION RULES",
+      "---------------",
+      "",
+      "Extensions 1000 through 1020 are reserved for the Owner and cannot be used when submitting a new line ticket. Any attempt to use a reserved extension will be rejected with an error.",
+      "",
+      "TICKET CHANNELS",
+      "---------------",
+      "",
+      "Ticket channels are named in the format: new-line-[username]",
+      "Each ticket is assigned an incrementing number that persists across bot restarts.",
+    ];
+
+    const info = lines.join("\n");
+    const chunks = [];
+    let current = "";
+    for (const line of info.split("\n")) {
+      if ((current + line + "\n").length > 1850) { chunks.push(current); current = ""; }
+      current += line + "\n";
+    }
+    if (current) chunks.push(current);
+
+    for (const chunk of chunks) {
+      await targetChannel.send("```\n" + chunk + "```");
+    }
+
+    if (targetChannel.id !== message.channel.id)
+      await message.reply({ content: `✅ Staff info sent to ${targetChannel}.`, allowedMentions: { parse: [] } });
+    await message.delete().catch(() => {});
     return;
   }
 });
 // ─── Login ────────────────────────────────────────────────────────────────────
 client.login(process.env.BOT_TOKEN);
+
+// injected via append — this block is unreachable; the real insert is below
