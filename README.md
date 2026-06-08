@@ -113,5 +113,5 @@ e.g. `ticket-john-ext1025`
 
 | Range | Status |
 |---|---|
-| 1000–1020 |  Reserved for Owner — blocked |
+| 1000–1020 |  Reserved for Owner  blocked |
 | All others |  Allowed |
