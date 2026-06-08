@@ -514,6 +514,45 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    // ── Edit Form Open Button ──
+    if (interaction.isButton() && interaction.customId.startsWith("editform_open:")) {
+      const type = interaction.customId.split(":")[1];
+      if (!isAdmin(interaction.member))
+        return interaction.reply({ content: "❌ Only admins can edit forms.", ephemeral: true });
+
+      const form = formConfig[type];
+      const panelInfo = panelRegistry.get(type);
+
+      const modal = new ModalBuilder()
+        .setCustomId(`editform_modal:${type}:${panelInfo?.messageId ?? "none"}`)
+        .setTitle(`✏️ Edit ${type === "line" ? "New Line" : "General"} Form`);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("form_title").setLabel("Modal Title")
+            .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.title).setMaxLength(100)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("field1_label").setLabel("Field 1 Label")
+            .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.fields[0]?.label ?? "").setMaxLength(100)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("field2_label").setLabel("Field 2 Label")
+            .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.fields[1]?.label ?? "").setMaxLength(100)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("field3_label").setLabel("Field 3 Label")
+            .setStyle(TextInputStyle.Short).setRequired(false).setValue(form.fields[2]?.label ?? "").setMaxLength(100)
+        ),
+        new ActionRowBuilder().addComponents(
+          new TextInputBuilder().setCustomId("field4_label").setLabel("Field 4 Label")
+            .setStyle(TextInputStyle.Short).setRequired(false).setValue(form.fields[3]?.label ?? "").setMaxLength(100)
+        ),
+      );
+      await interaction.showModal(modal);
+      return;
+    }
+
   } catch (err) {
     console.error("[interactionCreate error]", err);
   }
@@ -685,49 +724,5 @@ client.on("messageCreate", async (message) => {
     return;
   }
 });
-
-// Handle the editform open button
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
-  if (!interaction.customId.startsWith("editform_open:")) return;
-
-  const type = interaction.customId.split(":")[1];
-  if (!isAdmin(interaction.member)) {
-    return interaction.reply({ content: "❌ Only admins can edit forms.", ephemeral: true });
-  }
-
-  const form = formConfig[type];
-  const panelInfo = panelRegistry.get(type);
-
-  const modal = new ModalBuilder()
-    .setCustomId(`editform_modal:${type}:${panelInfo?.messageId ?? "none"}`)
-    .setTitle(`✏️ Edit ${type === "line" ? "New Line" : "General"} Form`);
-
-  modal.addComponents(
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("form_title").setLabel("Modal Title")
-        .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.title).setMaxLength(100)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("field1_label").setLabel("Field 1 Label")
-        .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.fields[0]?.label ?? "").setMaxLength(100)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("field2_label").setLabel("Field 2 Label")
-        .setStyle(TextInputStyle.Short).setRequired(true).setValue(form.fields[1]?.label ?? "").setMaxLength(100)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("field3_label").setLabel("Field 3 Label")
-        .setStyle(TextInputStyle.Short).setRequired(false).setValue(form.fields[2]?.label ?? "").setMaxLength(100)
-    ),
-    new ActionRowBuilder().addComponents(
-      new TextInputBuilder().setCustomId("field4_label").setLabel("Field 4 Label")
-        .setStyle(TextInputStyle.Short).setRequired(false).setValue(form.fields[3]?.label ?? "").setMaxLength(100)
-    ),
-  );
-
-  await interaction.showModal(modal);
-});
-
 // ─── Login ────────────────────────────────────────────────────────────────────
 client.login(process.env.BOT_TOKEN);
