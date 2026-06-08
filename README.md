@@ -6,11 +6,11 @@ A Discord ticketing bot with modal forms, automatic channel creation, and staff 
 
 ## Features
 
--  **Ticket Panel** — persistent button embed in any channel
--  **Form** — collects Extension, Caller ID, Voicemail, and Additional Features
--  **Extension Guard** — blocks 1000–1020 (reserved for Owner)
--  **Private Channel** — auto-created with correct permissions for staff roles + user
--  **?close** command — staff-only, prompts for reason, sends confirmation embed, deletes channel after 5s
+-  **Ticket Panel**  persistent button embed in any channel
+-  **Form** collects Extension, Caller ID, Voicemail, and Additional Features
+-  **Extension Guard**  blocks 1000–1020 (reserved for Owner)
+-  **Private Channel**  auto-created with correct permissions for staff roles + user
+-  **?close** command  staff-only, prompts for reason, sends confirmation embed, deletes channel after 5s
 
 ---
 
