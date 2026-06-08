@@ -309,9 +309,13 @@ function buildLinePanel() {
     embeds: [new EmbedBuilder()
       .setTitle("📱 New Line Request")
       .setDescription(
-        "Need a new line set up? Click below to open a ticket.\n\n" +
-        "**You'll be asked for:**\n• 🔢 Extension number\n• 📋 Caller ID\n• 📬 Voicemail preference\n• ⭐ Additional features\n\n" +
-        "*Extensions 1000–1020 are reserved for the Owner.*"
+        "Looking to get a new line set up? Click the button below to submit a new line request.\n\n" +
+        "You will be asked for:\n" +
+        "- Extension number\n" +
+        "- Caller ID\n" +
+        "- Voicemail preference\n" +
+        "- Any additional features or notes\n\n" +
+        "Please choose an extension that is not already in use. View the list of taken extensions here: http://bit.ly/4vuikDy"
       )
       .setColor(0x5865f2)
       .setFooter({ text: "Our staff will be with you shortly." })
