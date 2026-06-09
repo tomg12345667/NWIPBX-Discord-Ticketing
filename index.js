@@ -127,7 +127,7 @@ async function createTicketChannel(guild, opener, { type = "line", fields = {}, 
   ];
 
   const channelOptions = {
-    name: `📱new-line-${opener.username}`,
+    name: type === "line" ? `📱new-line-${opener.username}` : `🎟️general-support-${opener.username}`,
     type: ChannelType.GuildText,
     permissionOverwrites,
     topic: `Ticket #${ticketNumber} | ${opener.tag} | Type: ${type}`,
@@ -307,21 +307,21 @@ async function handleCloseTicket(interaction, reason) {
 function buildLinePanel() {
   return {
     embeds: [new EmbedBuilder()
-      .setTitle("📱 New Line Request")
+      .setTitle("NWIPBX - New Line Request")
       .setDescription(
-        "Looking to get a new line set up? Click the button below to submit a new line request.\n\n" +
+        "To request a new line, click the button below to get started.\n\n" +
         "You will be asked for:\n" +
         "- Extension number\n" +
         "- Caller ID\n" +
         "- Voicemail preference\n" +
         "- Any additional features or notes\n\n" +
-        "Please choose an extension that is not already in use. View the list of taken extensions here: http://bit.ly/4vuikDy"
+        "If you are unsure which extension to request, a member of our team will assist you during the process."
       )
       .setColor(0x5865f2)
-      .setFooter({ text: "Our staff will be with you shortly." })
+      .setFooter({ text: "NWIPBX - A team member will be with you shortly." })
       .setTimestamp()],
     components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("open_ticket:line").setLabel("📱 New Line").setStyle(ButtonStyle.Primary)
+      new ButtonBuilder().setCustomId("open_ticket:line").setLabel("New Line Request").setStyle(ButtonStyle.Primary)
     )],
   };
 }
@@ -329,16 +329,20 @@ function buildLinePanel() {
 function buildGeneralPanel() {
   return {
     embeds: [new EmbedBuilder()
-      .setTitle("🎫 General Support")
+      .setTitle("NWIPBX - General Support")
       .setDescription(
-        "Need help with something? Click below to open a support ticket.\n\n" +
-        "**You'll be asked for:**\n• 📝 Subject\n• 📋 Description\n• ⚡ Priority\n• ⭐ Additional info"
+        "Need assistance? Click the button below to open a support ticket and a member of our team will be with you shortly.\n\n" +
+        "You will be asked for:\n" +
+        "- Subject\n" +
+        "- Description of your issue\n" +
+        "- Priority level\n" +
+        "- Any additional information"
       )
       .setColor(0x57f287)
-      .setFooter({ text: "Our staff will be with you shortly." })
+      .setFooter({ text: "NWIPBX - A team member will be with you shortly." })
       .setTimestamp()],
     components: [new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("open_ticket:general").setLabel("🎫 Open Support Ticket").setStyle(ButtonStyle.Success)
+      new ButtonBuilder().setCustomId("open_ticket:general").setLabel("Open Support Ticket").setStyle(ButtonStyle.Success)
     )],
   };
 }
@@ -833,8 +837,8 @@ client.on("messageCreate", async (message) => {
     }
 
     const lines = [
-      "TICKETING SYSTEM - STAFF INFORMATION",
-      "=====================================",
+      "NWIPBX - STAFF INFORMATION",
+      "===========================",
       "",
       "COMMANDS",
       "--------",
