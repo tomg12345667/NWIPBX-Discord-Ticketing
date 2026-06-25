@@ -279,7 +279,8 @@ function buildLinePanel() {
         "- Caller ID\n" +
         "- Voicemail preference\n" +
         "- Any additional features or notes\n\n" +
-        "If you are unsure which extension to request, a member of our team will assist you during the process."
+        "If you are unsure which extension to request, a member of our team will assist you during the process.\n\n" +
+        "Click here to view the current extension list before making your selection: http://bit.ly/4vuikDy"
       )
       .setColor(0x5865f2)
       .setFooter({ text: "NWIPBX - A team member will be with you shortly." })
