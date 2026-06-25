@@ -730,7 +730,6 @@ client.on("messageCreate", async (message) => {
   // ── ?close <reason> ──
   if (message.content.startsWith("?close")) {
     if (!isStaff(member)) return message.reply("Only staff can close tickets.");
-    if (!isTicketChannel(message.channel.id)) return message.reply("This command can only be used inside a ticket channel.");
 
     const reason = message.content.slice("?close".length).trim() || "No reason provided";
     await message.channel.send({
@@ -752,8 +751,6 @@ client.on("messageCreate", async (message) => {
   // ── ?extensioncreated ──
   if (message.content.startsWith("?extensioncreated")) {
     if (!isStaff(member)) return message.reply("Only staff can use this command.");
-    if (!isTicketChannel(message.channel.id)) return message.reply("This command can only be used inside a ticket channel.");
-
     await message.reply({
       content: "Click below to enter the extension details.",
       components: [new ActionRowBuilder().addComponents(
