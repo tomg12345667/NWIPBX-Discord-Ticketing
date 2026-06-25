@@ -67,6 +67,7 @@ let formConfig = loadForm();
 // ─── Registries ───────────────────────────────────────────────────────────────
 const ticketRegistry  = new Map(); // channelId -> ticketData
 const panelRegistry   = new Map(); // type -> { channelId, messageId }
+const pendingExtData  = new Map(); // userId -> { ext, secret, sipSrv, sipPort, callerId, channelId }
 let ticketCounter_ref = ticketCounter;
 
 function nextTicketNumber() {
@@ -384,10 +385,33 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
+    // ── Extension Created: First Modal Submit ──
+    if (interaction.isModalSubmit() && interaction.customId === "extensioncreated_submit") {
+      const ext      = interaction.fields.getTextInputValue("ext_number").trim();
+      const secret   = interaction.fields.getTextInputValue("ext_secret").trim();
+      const sipSrv   = interaction.fields.getTextInputValue("sip_server").trim();
+      const sipPort  = interaction.fields.getTextInputValue("sip_port").trim();
+      const callerId = interaction.fields.getTextInputValue("caller_id").trim();
+
+      // Store in memory keyed by user ID, retrieved in second modal
+      pendingExtData.set(interaction.user.id, { ext, secret, sipSrv, sipPort, callerId, channelId: interaction.channel.id });
+
+      await interaction.reply({
+        content: "First step saved. Click below to enter voicemail details.",
+        ephemeral: true,
+        components: [new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("extensioncreated_vm")
+            .setLabel("Continue - Voicemail Details")
+            .setStyle(ButtonStyle.Primary)
+        )],
+      });
+      return;
+    }
+
     // ── Extension Created: Second Modal (Voicemail) ──
-    if (interaction.isButton() && interaction.customId.startsWith("extensioncreated_vm:")) {
-      const dataStr = interaction.customId.split(":").slice(1).join(":");
-      const modal = new ModalBuilder().setCustomId(`extensioncreated_vm_submit:${dataStr}`).setTitle("Voicemail Details");
+    if (interaction.isButton() && interaction.customId === "extensioncreated_vm") {
+      const modal = new ModalBuilder().setCustomId("extensioncreated_vm_submit").setTitle("Voicemail Details");
       modal.addComponents(
         new ActionRowBuilder().addComponents(
           new TextInputBuilder().setCustomId("voicemail").setLabel("Voicemail?").setPlaceholder("Yes or No").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(10)
@@ -400,64 +424,41 @@ client.on("interactionCreate", async (interaction) => {
       return;
     }
 
-    // ── Extension Created: First Modal Submit ──
-    if (interaction.isModalSubmit() && interaction.customId === "extensioncreated_submit") {
-      const ext      = interaction.fields.getTextInputValue("ext_number").trim();
-      const secret   = interaction.fields.getTextInputValue("ext_secret").trim();
-      const sipSrv   = interaction.fields.getTextInputValue("sip_server").trim();
-      const sipPort  = interaction.fields.getTextInputValue("sip_port").trim();
-      const callerId = interaction.fields.getTextInputValue("caller_id").trim();
-
-      // Encode first modal data into customId for second modal
-      const encoded = Buffer.from(JSON.stringify({ ext, secret, sipSrv, sipPort, callerId })).toString("base64");
-
-      await interaction.reply({
-        content: "First step saved. Click below to enter voicemail details.",
-        ephemeral: true,
-        components: [new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`extensioncreated_vm:${encoded}`)
-            .setLabel("Continue - Voicemail Details")
-            .setStyle(ButtonStyle.Primary)
-        )],
-      });
-      return;
-    }
-
     // ── Extension Created: Voicemail Modal Submit ──
-    if (interaction.isModalSubmit() && interaction.customId.startsWith("extensioncreated_vm_submit:")) {
-      const encoded  = interaction.customId.split(":").slice(1).join(":");
-      let parsed;
-      try { parsed = JSON.parse(Buffer.from(encoded, "base64").toString("utf-8")); }
-      catch { return interaction.reply({ content: "Failed to parse extension data.", ephemeral: true }); }
+    if (interaction.isModalSubmit() && interaction.customId === "extensioncreated_vm_submit") {
+      const pending = pendingExtData.get(interaction.user.id);
+      if (!pending) return interaction.reply({ content: "Session expired. Please run ?extensioncreated again.", ephemeral: true });
+      pendingExtData.delete(interaction.user.id);
 
-      const { ext, secret, sipSrv, sipPort, callerId } = parsed;
+      const { ext, secret, sipSrv, sipPort, callerId, channelId } = pending;
       const voicemail = interaction.fields.getTextInputValue("voicemail").trim();
       const vmPin     = interaction.fields.getTextInputValue("vm_pin").trim();
 
-      // Post details to ticket channel
+      // Post to the channel where ?extensioncreated was run
+      let targetChannel;
+      try { targetChannel = await client.channels.fetch(channelId); }
+      catch { return interaction.reply({ content: "Could not find the original channel.", ephemeral: true }); }
+
       const embed = new EmbedBuilder()
         .setTitle("Extension Created")
         .setColor(0x57f287)
         .addFields(
-          { name: "Extension",    value: ext,      inline: true },
-          { name: "Secret",       value: secret,   inline: true },
-          { name: "SIP Server",   value: sipSrv,   inline: true },
-          { name: "SIP Port",     value: sipPort,  inline: true },
-          { name: "Caller ID",    value: callerId, inline: true },
-          { name: "Voicemail",    value: voicemail, inline: true },
+          { name: "Extension",     value: ext,                    inline: true },
+          { name: "Secret",        value: secret,                 inline: true },
+          { name: "SIP Server",    value: sipSrv,                 inline: true },
+          { name: "SIP Port",      value: sipPort,                inline: true },
+          { name: "Caller ID",     value: callerId,               inline: true },
+          { name: "Voicemail",     value: voicemail,              inline: true },
           { name: "Voicemail PIN", value: vmPin || "Not provided", inline: true },
         )
         .setFooter({ text: `Created by ${interaction.user.tag}` })
         .setTimestamp();
 
-      await interaction.channel.send({ embeds: [embed] });
+      await targetChannel.send({ embeds: [embed] });
 
-      // Get ticket opener
-      const ticketData = ticketRegistry.get(interaction.channel.id);
+      const ticketData = ticketRegistry.get(channelId);
       const openerId   = ticketData?.openerId;
 
-      // Send ephemeral role grant prompt to the staff member who ran the command
       await interaction.reply({
         ephemeral: true,
         embeds: [new EmbedBuilder()
