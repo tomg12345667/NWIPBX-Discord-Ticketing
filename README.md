@@ -1,4 +1,4 @@
-# MWIPBX
+# NWIPBX
 
 A Discord ticketing bot with modal forms, automatic channel creation, and staff close flow.
 
