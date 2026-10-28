@@ -96,6 +96,21 @@ Change these if needed.
 | Command | Who | Description |
 |---|---|---|
 | `?close <reason>` | Staff only | Sends close confirmation to channel, deletes after 5s |
+| `?dm <user> <message>` | Staff only | Starts a DM conversation with a **timed-out** member and opens a private `dm-<username>` relay channel |
+| `?dmclose <reason>` | Staff only | Closes the DM conversation, posts a transcript, deletes the relay channel after 5s |
+
+---
+
+## DM Conversations (Timed-Out Members)
+
+Timed-out members can't type in channels, so staff can reach them by DM through the bot:
+
+- Only staff can start a conversation with `?dm`. Members who DM the bot without an open conversation get the usual auto-reply.
+- The member must be timed out to start one. Once open, it stays open until `?dmclose`, even if the timeout ends.
+- Everything staff type in the `dm-<username>` channel is sent to the member. Messages starting with `?` are not sent, so they work as internal notes.
+- ✅ means delivered, ❌ means the member has DMs off or left.
+- Open conversations are saved to `dm_sessions.json` and survive restarts.
+- Optional: set `DM_CATEGORY_ID` in `.env` to put relay channels in their own category (defaults to `TICKET_CATEGORY_ID`).
 
 ---
 
@@ -114,5 +129,3 @@ e.g. `ticket-john-ext1025`
 | Range | Status |
 |---|---|
 | 1000–1020 |  Reserved for Owner  blocked |
-| All others |  Allowed |
-
