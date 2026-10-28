@@ -1,0 +1,314 @@
+diff --git a/README.md b/README.md
+index 2249a02..c1fd3ec 100644
+--- a/README.md
++++ b/README.md
+@@ -96,6 +96,21 @@ Change these if needed.
+ | Command | Who | Description |
+ |---|---|---|
+ | `?close <reason>` | Staff only | Sends close confirmation to channel, deletes after 5s |
++| `?dm <user> <message>` | Staff only | Starts a DM conversation with a **timed-out** member and opens a private `dm-<username>` relay channel |
++| `?dmclose <reason>` | Staff only | Closes the DM conversation, posts a transcript, deletes the relay channel after 5s |
++
++---
++
++## DM Conversations (Timed-Out Members)
++
++Timed-out members can't type in channels, so staff can reach them by DM through the bot:
++
++- Only staff can start a conversation with `?dm`. Members who DM the bot without an open conversation get the usual auto-reply.
++- The member must be timed out to start one. Once open, it stays open until `?dmclose`, even if the timeout ends.
++- Everything staff type in the `dm-<username>` channel is sent to the member. Messages starting with `?` are not sent, so they work as internal notes.
++- ✅ means delivered, ❌ means the member has DMs off or left.
++- Open conversations are saved to `dm_sessions.json` and survive restarts.
++- Optional: set `DM_CATEGORY_ID` in `.env` to put relay channels in their own category (defaults to `TICKET_CATEGORY_ID`).
+ 
+ ---
+ 
+diff --git a/index.js b/index.js
+index 699a467..61eeedf 100644
+--- a/index.js
++++ b/index.js
+@@ -25,6 +25,7 @@ const NEW_LINE_ROLE        = "1516587356386492416";
+ const TICKET_CATEGORY_ID   = process.env.TICKET_CATEGORY_ID || null;
+ const ADMIN_ROLE           = process.env.ADMIN_ROLE_ID || STAFF_ROLE_1;
+ const OWNER_EXTENSIONS     = Array.from({ length: 21 }, (_, i) => 1000 + i);
++const DM_CATEGORY_ID       = process.env.DM_CATEGORY_ID || TICKET_CATEGORY_ID;
+ 
+ // ─── Counter ──────────────────────────────────────────────────────────────────
+ const COUNTER_FILE = path.join(__dirname, "counter.json");
+@@ -64,6 +65,28 @@ function loadForm() {
+ function saveForm(data) { fs.writeFileSync(FORM_FILE, JSON.stringify(data, null, 2), "utf-8"); }
+ let formConfig = loadForm();
+ 
++// ─── DM Sessions (staff-initiated DMs with timed-out members) ────────────────
++// Persisted so an open conversation survives a bot restart.
++const DM_SESSIONS_FILE = path.join(__dirname, "dm_sessions.json");
++function loadDmSessions() {
++  try { if (fs.existsSync(DM_SESSIONS_FILE)) return new Map(Object.entries(JSON.parse(fs.readFileSync(DM_SESSIONS_FILE, "utf-8")))); } catch {}
++  return new Map();
++}
++function saveDmSessions() {
++  try { fs.writeFileSync(DM_SESSIONS_FILE, JSON.stringify(Object.fromEntries(dmSessions), null, 2), "utf-8"); }
++  catch (err) { console.error("Could not save DM sessions:", err); }
++}
++const dmSessions = loadDmSessions(); // userId -> { channelId, guildId, userTag, startedBy, startedAt, log: [] }
++
++function getDmSessionByChannel(channelId) {
++  for (const [userId, s] of dmSessions) if (s.channelId === channelId) return [userId, s];
++  return null;
++}
++function logDm(session, authorTag, direction, text, attachments = []) {
++  session.log.push({ at: new Date().toISOString(), authorTag, direction, text, attachments });
++  saveDmSessions();
++}
++
+ // ─── Registries ───────────────────────────────────────────────────────────────
+ const ticketRegistry  = new Map(); // channelId -> ticketData
+ const panelRegistry   = new Map(); // type -> { channelId, messageId }
+@@ -268,6 +291,137 @@ async function handleCloseTicket(interaction, reason) {
+   }, 5000);
+ }
+ 
++// ─── DM relay helpers ─────────────────────────────────────────────────────────
++function dmEmbed(fromLabel, text, color, attachments = []) {
++  const embed = new EmbedBuilder()
++    .setAuthor({ name: fromLabel })
++    .setDescription(text || "*No text*")
++    .setColor(color)
++    .setTimestamp();
++  if (attachments.length) embed.addFields({ name: "Attachments", value: attachments.join("\n").slice(0, 1024) });
++  return embed;
++}
++
++async function openDmSession(guild, targetMember, staffUser) {
++  const user = targetMember.user;
++  const permissionOverwrites = [
++    { id: guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel] },
++    { id: STAFF_ROLE_1, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
++    { id: STAFF_ROLE_2, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
++  ];
++  const channelOptions = {
++    name: `dm-${user.username}`,
++    type: ChannelType.GuildText,
++    permissionOverwrites,
++    topic: `DM session with ${user.tag} (${user.id}) | Started by ${staffUser.tag}`,
++  };
++  if (DM_CATEGORY_ID) channelOptions.parent = DM_CATEGORY_ID;
++  const channel = await guild.channels.create(channelOptions);
++
++  const session = {
++    channelId: channel.id, guildId: guild.id, userTag: user.tag,
++    startedBy: staffUser.tag, startedAt: new Date().toISOString(), log: [],
++  };
++  dmSessions.set(user.id, session);
++  saveDmSessions();
++
++  const until = targetMember.communicationDisabledUntil;
++  await channel.send({
++    embeds: [new EmbedBuilder()
++      .setTitle("DM Session Opened")
++      .setColor(0xfee75c)
++      .addFields(
++        { name: "Member",      value: `<@${user.id}> (${user.tag})`, inline: true },
++        { name: "Started By",  value: staffUser.tag, inline: true },
++        { name: "Timed Out Until", value: until ? `<t:${Math.floor(until.getTime() / 1000)}:F>` : "Not timed out", inline: true },
++      )
++      .setDescription(
++        "Anything staff type in this channel is sent to the member by DM, and their DM replies appear here.\n" +
++        "Messages starting with `?` are **not** sent, so you can use them for internal notes.\n" +
++        "Use `?dmclose <reason>` to end the conversation."
++      )
++      .setTimestamp()],
++  });
++  return { channel, session };
++}
++
++// Sends a staff message to the member. Returns true if delivered.
++async function relayStaffToUser(userId, session, staffUser, text, attachments = []) {
++  try {
++    const user = await client.users.fetch(userId);
++    await user.send({ embeds: [dmEmbed("NWIPBX Staff", text, 0x5865f2, attachments)] });
++    logDm(session, staffUser.tag, "staff -> member", text, attachments);
++    return true;
++  } catch (err) {
++    console.warn("Could not DM member:", err.message);
++    return false;
++  }
++}
++
++async function closeDmSession(userId, session, closedByTag, reason) {
++  dmSessions.delete(userId);
++  saveDmSessions();
++
++  try {
++    const user = await client.users.fetch(userId);
++    await user.send({ embeds: [new EmbedBuilder()
++      .setTitle("Conversation Closed")
++      .setDescription(`This conversation with NWIPBX staff has been closed.\n\n**Reason:** ${reason}`)
++      .setColor(0xed4245)
++      .setTimestamp()] });
++  } catch {}
++
++  const lines = [
++    "NWIPBX - DM SESSION TRANSCRIPT",
++    "==============================",
++    "",
++    `Member     : ${session.userTag} (${userId})`,
++    `Started by : ${session.startedBy}`,
++    `Started at : ${new Date(session.startedAt).toLocaleString()}`,
++    `Closed by  : ${closedByTag}`,
++    `Reason     : ${reason}`,
++    "",
++    "---",
++    "",
++  ];
++  for (const entry of session.log) {
++    lines.push(`[${new Date(entry.at).toLocaleString()}] ${entry.authorTag} (${entry.direction})`);
++    lines.push(`  ${entry.text || "[No text]"}`);
++    if (entry.attachments?.length) lines.push(`  Attachments: ${entry.attachments.join(", ")}`);
++    lines.push("");
++  }
++  lines.push("---", "End of transcript");
++
++  try {
++    const transcriptChannel = await client.channels.fetch(TRANSCRIPT_CHANNEL);
++    await transcriptChannel.send({ embeds: [new EmbedBuilder()
++      .setTitle("Transcript - DM Session")
++      .setColor(0xfee75c)
++      .addFields(
++        { name: "Member",    value: `<@${userId}>`, inline: true },
++        { name: "Closed By", value: closedByTag, inline: true },
++        { name: "Reason",    value: reason },
++      )
++      .setTimestamp()] });
++    let current = "";
++    for (const line of lines) {
++      if ((current + line + "\n").length > 1850) { await transcriptChannel.send("```\n" + current + "```"); current = ""; }
++      current += line + "\n";
++    }
++    if (current) await transcriptChannel.send("```\n" + current + "```");
++  } catch (err) { await reportError(err, "closeDmSession > transcript"); }
++
++  try {
++    const channel = await client.channels.fetch(session.channelId);
++    await channel.send({ embeds: [new EmbedBuilder()
++      .setTitle("DM Session Closed")
++      .setColor(0xed4245)
++      .addFields({ name: "Closed By", value: closedByTag, inline: true }, { name: "Reason", value: reason, inline: true })
++      .setTimestamp()] });
++    setTimeout(() => channel.delete(`DM session closed by ${closedByTag}: ${reason}`).catch(err => reportError(err, "closeDmSession > delete")), 5000);
++  } catch {}
++}
++
+ // ─── Panel builders ───────────────────────────────────────────────────────────
+ function buildLinePanel() {
+   return {
+@@ -685,6 +839,23 @@ client.on("messageCreate", async (message) => {
+   // DM handler
+   if (!message.guild) {
+     if (message.author.bot) return;
++
++    // Member has an open staff-initiated DM session: relay their reply to staff
++    const session = dmSessions.get(message.author.id);
++    if (session) {
++      const attachments = [...message.attachments.values()].map(a => a.url);
++      try {
++        const relayChannel = await client.channels.fetch(session.channelId);
++        await relayChannel.send({ embeds: [dmEmbed(message.author.tag, message.content, 0x57f287, attachments)] });
++        logDm(session, message.author.tag, "member -> staff", message.content, attachments);
++        await message.react("✅").catch(() => {});
++      } catch (err) {
++        await reportError(err, "DM relay member -> staff");
++        await message.reply("Your message could not be delivered to staff right now. Please try again shortly.").catch(() => {});
++      }
++      return;
++    }
++
+     try {
+       await message.author.send(
+         "Thank you for reaching out to NWIPBX. All tickets are handled inside our Discord server via ticket channels. " +
+@@ -696,10 +867,70 @@ client.on("messageCreate", async (message) => {
+   }
+ 
+   if (message.author.bot) return;
+-  if (!message.content.startsWith("?")) return;
+ 
+   const member = message.member;
+ 
++  // Staff typing in a DM relay channel: forward to the member (unless it's a ?command/note)
++  if (!message.content.startsWith("?")) {
++    const found = getDmSessionByChannel(message.channel.id);
++    if (found && isStaff(member)) {
++      const [userId, session] = found;
++      const attachments = [...message.attachments.values()].map(a => a.url);
++      const ok = await relayStaffToUser(userId, session, message.author, message.content, attachments);
++      await message.react(ok ? "✅" : "❌").catch(() => {});
++      if (!ok) await message.reply("Could not deliver that message. The member may have DMs turned off or may have left the server.").catch(() => {});
++    }
++    return;
++  }
++
++  // ── ?dmclose <reason> ──
++  if (message.content.startsWith("?dmclose")) {
++    if (!isStaff(member)) return message.reply("Only staff can close DM sessions.");
++    const found = getDmSessionByChannel(message.channel.id);
++    if (!found) return message.reply("This command can only be used inside a DM session channel.");
++    const reason = message.content.slice("?dmclose".length).trim() || "No reason provided";
++    await closeDmSession(found[0], found[1], message.author.tag, reason);
++    return;
++  }
++
++  // ── ?dm <user> <message> ──
++  if (message.content.startsWith("?dm ") || message.content === "?dm") {
++    if (!isStaff(member)) return message.reply("Only staff can start DM conversations.");
++    const arg   = message.content.slice("?dm".length).trim();
++    const match = arg.match(/^(?:<@!?(\d+)>|(\d+))\s+([\s\S]+)$/);
++    if (!match) return message.reply("Usage: ?dm <user id or @mention> <message>");
++
++    const userId = match[1] ?? match[2];
++    const text   = match[3].trim();
++
++    const targetMember = await message.guild.members.fetch(userId).catch(() => null);
++    if (!targetMember) return message.reply("That user is not in this server.");
++
++    let session = dmSessions.get(userId);
++    let channel;
++    if (session) {
++      channel = await client.channels.fetch(session.channelId).catch(() => null);
++      if (!channel) { dmSessions.delete(userId); saveDmSessions(); session = null; }
++    }
++
++    if (!session) {
++      if (!targetMember.isCommunicationDisabled())
++        return message.reply("That member is not timed out. DM sessions can only be started with timed-out members.");
++      try { ({ channel, session } = await openDmSession(message.guild, targetMember, message.author)); }
++      catch (err) { await reportError(err, "?dm open"); return message.reply("Failed to create the DM session channel."); }
++    }
++
++    const ok = await relayStaffToUser(userId, session, message.author, text);
++    if (ok) {
++      await channel.send({ embeds: [dmEmbed(`${message.author.tag} (to member)`, text, 0x5865f2)] });
++    } else {
++      await channel.send(`Could not DM <@${userId}>. They may have DMs from server members turned off.`);
++    }
++    if (channel.id !== message.channel.id)
++      await message.reply({ content: ok ? `Message sent. Conversation: ${channel}` : `Could not DM that member. See ${channel}.`, allowedMentions: { parse: [] } });
++    return;
++  }
++
+   // ── ?sendpanel <line|general> <channel id> ──
+   if (message.content.startsWith("?sendpanel")) {
+     if (!isStaff(member)) return message.reply("Only staff can deploy panels.");
+@@ -867,6 +1098,12 @@ client.on("messageCreate", async (message) => {
+       "?ticket sendstaffinfo <channel id>",
+       "Sends this staff information message to the specified channel.",
+       "",
++      "?dm <user id or @mention> <message>",
++      "Starts a DM conversation with a timed-out member (they cannot message in channels). Creates a private dm-[username] channel for staff. Anything staff type there is sent to the member by DM, and their replies appear in the channel. Members cannot start these conversations themselves. Messages starting with ? are not sent, so they can be used as internal notes.",
++      "",
++      "?dmclose <reason>",
++      "Used inside a dm-[username] channel. Tells the member the conversation is closed, posts a transcript to the transcripts log channel, and deletes the channel after 5 seconds.",
++      "",
+       "HOW CLOSING WORKS",
+       "-----------------",
+       "",
